@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Město RPG 3D – IZS vysílačky (plná verze)</title>
+<style>
+  html,body{margin:0;background:#071018;color:#e9eef5;font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Inter,sans-serif;overflow:hidden}
+  #ui{position:fixed;left:0;right:0;top:0;display:flex;gap:8px;flex-wrap:wrap;align-items:center;padding:10px;background:linear-gradient(180deg,rgba(0,0,0,.6),transparent);z-index:20}
+  .pill{padding:6px 10px;background:#101720;border:1px solid #263244;border-radius:999px;font-size:12px}
+  select,button,input{background:#101720;color:#e9eef5;border:1px solid #263244;border-radius:10px;padding:6px 10px}
+  #radioPanel{display:flex;gap:8px;align-items:center}
+  #hud{position:fixed;left:10px;bottom:10px;display:grid;gap:6px;z-index:20}
+  #toast{position:fixed;left:50%;bottom:72px;transform:translateX(-50%);background:#071018cc;border:1px solid #253244;padding:8px 12px;border-radius:12px;font-size:13px;z-index:30;opacity:0;transition:opacity .2s}
+  #touch{position:fixed;left:0;right:0;bottom:0;display:flex;justify-content:space-between;align-items:flex-end;padding:12px;pointer-events:none;z-index:11}
+  .pad{pointer-events:auto;width:160px;height:160px;border-radius:50%;background:#071018bf;border:1px solid #2a3444;position:relative;touch-action:none}
+  .stick{width:64px;height:64px;border-radius:50%;background:#121827;border:2px solid #3c4a60;position:absolute;left:48px;top:48px}
+  .btns{display:flex;gap:10px}
+  .gamebtn{pointer-events:auto;min-width:86px;min-height:56px;border-radius:14px;background:#121827cc;border:1px solid #3c4a60;font-weight:700}
+  #legend{position:fixed;right:10px;bottom:10px;background:#071018cc;border:1px solid #2a3444;border-radius:12px;padding:8px 10px;font-size:12px;max-width:360px;z-index:15}
+</style>
+</head>
+<body>
+<div id="ui">
+  <div class="pill">Role:
+    <select id="role">
+      <option value="civil">Civil</option>
+      <option value="police">Policista</option>
+      <option value="medic">Záchranář</option>
+      <option value="fire">Hasič</option>
+      <option value="trucker">Řidič kamionu</option>
+      <option value="pilot">Pilot</option>
+      <option value="brewer">Sládek</option>
+    </select>
+  </div>
+  <button id="respawn">Respawn</button>
+  <div id="radioPanel" class="pill">
+    <label>Vysílačka:</label>
+    <button id="radioToggle">Vypnuta</button>
+    <label>Kanál:</label>
+    <select id="radioChannel">
+      <option value="1">Hlavní 1</option>
+      <option value="2">Hlavní 2</option>
+      <option value="3">Police</option>
+      <option value="4">Hasiči</option>
+      <option value="5">Záchranka</option>
+    </select>
+    <select id="presetMsg">
+      <option value="Potřebuji podporu na mé pozici.">Potřebuji podporu na mé pozici.</option>
+      <option value="Požár v oblasti, žádám posily.">Požár v oblasti, žádám posily.</option>
+      <option value="Dopravní nehoda, potřebuji záchranku.">Dopravní nehoda, potřebuji záchranku.</option>
+      <option value="Kontaktujte mě na kanálu.">Kontaktujte mě na kanálu.</option>
+    </select>
+    <button id="sendRadio">Odeslat</button>
+    <label>Dosah:</label>
+    <input id="radioRange" type="range" min="20" max="240" value="120" />
+    <span id="rangeVal">120m</span>
+  </div>
+  <button id="toggleLights" class="pill">Semafory: <span id="tlmode">AUTO</span></button>
+  <button id="actionBtn" class="pill">Akce (Q)</button>
+</div>
+
+<div id="hud">
+  <div class="pill">💰 Peníze: <span id="money">0</span></div>
+  <div class="pill">⛽ Palivo: <span id="fuel">100</span>%</div>
+</div>
+
+<div id="toast"></div>
+
+<div id="touch">
+  <div class="pad" id="padL"><div class="stick"></div></div>
+  <div class="btns">
+    <button class="gamebtn" id="btnGas">Plyn</button>
+    <button class="gamebtn" id="btnBrake">Brzda</button>
+    <button class="gamebtn" id="btnSirena">Siréna</button>
+    <button class="gamebtn" id="btnInteract">Interakce</button>
+  </div>
+</div>
+
+<div id="legend">
+  Přidal jsem vysílačky (radio) pro IZS: policie, hasiči, záchranka. Pokud jsi ve stejné roli a na stejném kanálu, NPC IZS v dosahu reagují (přijedou, změní barvu a aktivují sirénu).<br>
+  Použití: zapni vysílačku, vyber kanál, vyber přednastavenou zprávu a stiskni Odeslat.<br>
+  Pokud chceš změnit text zprávy nebo přidat zvuky/aplikovat multiplayer, napiš a přidám to.
+</div>
+
+<!-- Three.js CDN -->
+<script src="https://unpkg.com/three@0.159.0/build/three.min.js"></script>
+<script src="https://unpkg.com/three@0.159.0/examples/js/controls/OrbitControls.js"></script>
+<script>
+// ---------- Scéna (základ) ----------
+let scene = new THREE.Scene();
+scene.background = new THREE.Color(0x071018);
+const camera = new THREE.PerspectiveCamera(60, window.innerWidth/window.innerHeight, 0.1, 1000);
+camera.position.set(0, 30, 40);
+const renderer = new THREE.WebGLRenderer({antialias:true});
+renderer.setPixelRatio(Math.min(2, window.devicePixelRatio||1));
+renderer.setSize(window.innerWidth, window.innerHeight);
+document.body.appendChild(renderer.domElement);
+const controls = new THREE.OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.target.set(0,0,0);
+const hemi = new THREE.HemisphereLight(0xbdd3ff, 0x081018, 0.6); scene.add(hemi);
+const dir = new THREE.DirectionalLight(0xffffff, 0.8); dir.position.set(20,40,10); scene.add(dir);
+
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(400,400), new THREE.MeshStandardMaterial({color:0x071018}));
+ground.rotation.x = -Math.PI/2; scene.add(ground);
+const roadMat = new THREE.MeshStandardMaterial({color:0x2a303a, roughness:0.9, metalness:0.0});
+const roads = new THREE.Group(); scene.add(roads);
+function addRoadStrip(x, z, w, h){ const g = new THREE.PlaneGeometry(w,h); const m = new THREE.Mesh(g, roadMat); m.rotation.x=-Math.PI/2; m.position.set(x,0.01,z); roads.add(m); }
+for(let i=-180;i<=180;i+=48){ addRoadStrip(i,0,2,400); addRoadStrip(0,i,400,2); }
+
+const buildings = new THREE.Group(); scene.add(buildings);
+const rand = (a,b)=> a + Math.random()*(b-a);
+
+for(let x=-180;x<=180;x+=24){
+  for(let z=-180;z<=180;z+=24){
+    if (Math.abs(x)%48<10 || Math.abs(z)%48<10) continue;
+    if (Math.random()<0.5){
+      const w = rand(8,16), d = rand(8,16), h = rand(8,36);
+      const geo = new THREE.BoxGeometry(w,h,d);
+      const mat = new THREE.MeshStandardMaterial({color:0x101720, metalness:0.1, roughness:0.9});
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.position.set(x, h/2, z);
+      buildings.add(mesh);
+    }
+  }
+}
+
+// Stations
+const stationDefs = [
+  {emoji:'🅿', name:'Police', pos:new THREE.Vector3(-96,0, -96)},
+  {emoji:'🚑', name:'Záchranka', pos:new THREE.Vector3(-48,0, -96)},
+  {emoji:'🚒', name:'Hasiči', pos:new THREE.Vector3(0,0, -96)},
+  {emoji:'⛟', name:'Depo', pos:new THREE.Vector3(48,0, -96)},
+  {emoji:'✈', name:'Letiště', pos:new THREE.Vector3(96,0, -96)},
+  {emoji:'🍺', name:'Pivovar', pos:new THREE.Vector3(-96,0, -48)},
+  {emoji:'⛽', name:'Benzínka', pos:new THREE.Vector3(-48,0, -48)},
+  {emoji:'🍔', name:'Restaurace', pos:new THREE.Vector3(0,0, -48)},
+  {emoji:'🏪', name:'Obchod', pos:new THREE.Vector3(48,0, -48)},
+];
+stationDefs.forEach(s=>{
+  const c = document.createElement('canvas'); c.width=128; c.height=128;
+  const cx = c.getContext('2d'); cx.font='96px "Segoe UI Emoji", "Noto Color Emoji", system-ui'; cx.textAlign='center'; cx.textBaseline='middle'; cx.fillText(s.emoji,64,64);
+  const tx = new THREE.CanvasTexture(c);
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({map:tx, transparent:true}));
+  sprite.scale.set(6,6,6); sprite.position.copy(s.pos).setY(3.5); scene.add(sprite);
+});
+
+// Traffic lights
+const lights = [];
+function addTrafficLight(x,z){ const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.2,0.2,4,8), new THREE.MeshStandardMaterial({color:0x202833})); pole.position.set(x,2,z);
+  const head = new THREE.Mesh(new THREE.BoxGeometry(0.6,1.2,0.6), new THREE.MeshStandardMaterial({color:0x111418})); head.position.set(x,3.1,z);
+  const bulbNS = new THREE.PointLight(0x45e06f, 0, 8); bulbNS.position.set(x,3.1,z+0.35);
+  const bulbEW = new THREE.PointLight(0x45e06f, 0, 8); bulbEW.position.set(x,3.1,z-0.35);
+  scene.add(pole, head, bulbNS, bulbEW); lights.push({bulbNS, bulbEW, state:0, t:0}); }
+for(let x=-144;x<=144;x+=48){ for(let z=-144;z<=144;z+=48){ addTrafficLight(x,z); } }
+let tlAuto = true;
+
+// Player object
+const player = { obj: new THREE.Group(), speed:0, angle:0, maxSpeed: 10, accel:0.06, turn:0.022,
+  fuel:100, money:0, hunger:0, thirst:0, sleep:0, siren:false, role:'civil', cargo:null, inAir:false,
+  radioOn:false, radioChannel:'1', radioRange:120
+};
+(function(){ const body = new THREE.Mesh(new THREE.BoxGeometry(2.2,0.8,4), new THREE.MeshStandardMaterial({color:0x66d38f})); body.position.y=0.5;
+  const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.8,0.6,2), new THREE.MeshStandardMaterial({color:0x0f141b})); cabin.position.set(0,0.9,-0.3);
+  player.obj.add(body,cabin); scene.add(player.obj); player.obj.position.set(-120,0.4,-120);
+})();
+
+// IZS vehicles and NPC vehicles
+const cars = [];
+function spawnCar(role){ // role: null or 'police'/'fire'/'medic'
+  const g = new THREE.Group(); const bodyMat = new THREE.MeshStandardMaterial({color:0xa0b3c9});
+  if (role==='police') bodyMat.color.setHex(0x2b6bff);
+  if (role==='fire') bodyMat.color.setHex(0xff6b39);
+  if (role==='medic') bodyMat.color.setHex(0x66d38f);
+  const body = new THREE.Mesh(new THREE.BoxGeometry(2.1,0.8,3.6), bodyMat); body.position.y=0.5; g.add(body);
+  // radio icon for IZS vehicles: small sprite above
+  if (role){
+    const c = document.createElement('canvas'); c.width=64; c.height=64;
+    const cx = c.getContext('2d'); cx.font='36px "Segoe UI Emoji", "Noto Color Emoji"'; cx.textAlign='center'; cx.textBaseline='middle';
+    cx.fillText('📻',32,32);
+    const tx = new THREE.CanvasTexture(c);
+    const sp = new THREE.Sprite(new THREE.SpriteMaterial({map:tx, transparent:true})); sp.scale.set(1.2,1.2,1.2); sp.position.set(0,1.4,0); g.add(sp);
+    g.userData.radio = true;
+  }
+  scene.add(g);
+  // position randomly on roads
+  const horizontal = Math.random()<0.5;
+  if (horizontal){ g.position.set(-180+Math.random()*360, 0.4, (Math.round(Math.random()*6)-3)*48); g.rotation.y = 0; }
+  else { g.position.set((Math.round(Math.random()*6)-3)*48, 0.4, -180+Math.random()*360); g.rotation.y = Math.PI/2; }
+  const obj = {obj:g, speed: 2+Math.random()*2, wait:0, role: role || null, responding:false, target:null};
+  cars.push(obj);
+  return obj;
+}
+// spawn mix: many civils + some IZS
+for(let i=0;i<50;i++){ spawnCar(null); }
+for(let i=0;i<6;i++){ spawnCar('police'); spawnCar('fire'); spawnCar('medic'); }
+
+// Pedestrians
+const pedestrians = [];
+function spawnPed(){ const m = new THREE.Mesh(new THREE.CylinderGeometry(0.3,0.35,1.6,8), new THREE.MeshStandardMaterial({color:0x8ab4ff})); m.position.set(-160+Math.random()*320,0.8,-160+Math.random()*320); scene.add(m);
+  pedestrians.push({obj:m, dir: Math.random()*Math.PI*2, speed: 0.6+Math.random()*0.4, alive:true, needHelp:false}); }
+for(let i=0;i<60;i++) spawnPed();
+
+// Inputs and UI bindings
+const keys = {};
+window.addEventListener('keydown', e=>{ keys[e.key.toLowerCase()] = true; if (e.key===' ') keys['space']=true; });
+window.addEventListener('keyup', e=>{ keys[e.key.toLowerCase()] = false; if (e.key===' ') keys['space']=false; });
+
+document.getElementById('role').addEventListener('change', e=>{ player.role = e.target.value; if (player.role==='pilot'){ player.inAir=true; player.maxSpeed=14; player.obj.position.y = 5; } else { player.inAir=false; player.maxSpeed=10; player.obj.position.y = 0.4; } });
+
+document.getElementById('respawn').onclick = ()=>{ player.obj.position.set(-120, player.inAir?5:0.4, -120); player.speed=0; };
+document.getElementById('toggleLights').onclick = ()=>{ tlAuto = !tlAuto; document.getElementById('tlmode').textContent = tlAuto?'AUTO':'MANUAL'; };
+document.getElementById('actionBtn').onclick = doRoleAction;
+
+// Radio UI
+const radioToggle = document.getElementById('radioToggle');
+const radioChannel = document.getElementById('radioChannel');
+const sendRadioBtn = document.getElementById('sendRadio');
+const preset = document.getElementById('presetMsg');
+const rangeInput = document.getElementById('radioRange');
+const rangeVal = document.getElementById('rangeVal');
+rangeInput.addEventListener('input', ()=>{ rangeVal.textContent = rangeInput.value + 'm'; player.radioRange = Number(rangeInput.value); });
+
+radioToggle.onclick = ()=>{ player.radioOn = !player.radioOn; radioToggle.textContent = player.radioOn? 'Zapnuta' : 'Vypnuta'; showToast('Vysílačka ' + (player.radioOn? 'zapnuta' : 'vypnuta')); };
+radioChannel.addEventListener('change', ()=>{ player.radioChannel = radioChannel.value; });
+sendRadioBtn.onclick = ()=>{ if (!player.radioOn){ showToast('Nejdříve zapni vysílačku'); return; } const msg = preset.value; broadcastRadio(msg); };
+
+// touch joystick
+const pad = document.getElementById('padL'); const stick = pad.querySelector('.stick'); let stickState={dx:0,dy:0};
+function touchPos(ev, el){ const r=el.getBoundingClientRect(); const t=ev.touches[0]; return {x:t.clientX-r.left, y:t.clientY-r.top}; }
+function moveStick(x,y){ const cx=pad.clientWidth/2, cy=pad.clientHeight/2; let dx=x-cx, dy=y-cy; const len=Math.hypot(dx,dy); const max=56; if (len>max){ dx=dx/len*max; dy=dy/len*max; } stick.style.left=(cx-32+dx)+'px'; stick.style.top=(cy-32+dy)+'px'; stickState.dx=dx/max; stickState.dy=dy/max; }
+function resetStick(){ stick.style.left='48px'; stick.style.top='48px'; stickState.dx=0; stickState.dy=0; }
+pad.addEventListener('touchstart', e=>{ e.preventDefault(); const p=touchPos(e,pad); moveStick(p.x,p.y); }, {passive:false});
+pad.addEventListener('touchmove', e=>{ e.preventDefault(); const p=touchPos(e,pad); moveStick(p.x,p.y); }, {passive:false});
+pad.addEventListener('touchend', resetStick, {passive:true});
+
+const btn = id=>document.getElementById(id);
+btn('btnGas').onpointerdown=()=>keys['mobile_gas']=true; btn('btnGas').onpointerup=()=>keys['mobile_gas']=false;
+btn('btnBrake').onpointerdown=()=>keys['mobile_brake']=true; btn('btnBrake').onpointerup=()=>keys['mobile_brake']=false;
+btn('btnSirena').onpointerdown=()=>{ player.siren = !player.siren; };
+btn('btnInteract').onpointerdown=()=>interact();
+
+// Utilities
+function showToast(s){ const t = document.getElementById('toast'); t.textContent = s; t.style.opacity = '1'; setTimeout(()=>t.style.opacity='0', 2200); }
+function dist3(a,b){ const dx=a.x-b.x, dz=a.z-b.z; return Math.sqrt(dx*dx + dz*dz); }
+
+// Radio broadcast: send message to nearby IZS vehicles on same channel
+function broadcastRadio(msg){
+  showToast('Vysíláš na kanál ' + player.radioChannel + ': ' + msg);
+  // create a visual floating text at player's position
+  createFloatingText(msg, player.obj.position.clone());
+  // For each car with role matching channel type, if within range and channel matches, make them respond
+  const range = player.radioRange;
+  cars.forEach(c=>{
+    if (!c.role) return;
+    const roleChannel = (c.role==='police'?'3':(c.role==='fire'?'4':(c.role==='medic'?'5':'1')));
+    if (roleChannel !== player.radioChannel) return;
+    const d = dist3(c.obj.position, player.obj.position);
+    if (d <= range){
+      c.responding = true; c.target = player.obj.position.clone();
+      c.obj.userData.respondTimer = 6.0;
+      showToast(c.role.toUpperCase() + ' reaguje: ' + msg);
+    }
+  });
+}
+
+// Floating text helper
+const floatGroup = new THREE.Group(); scene.add(floatGroup);
+function createFloatingText(text, position){
+  const canvas = document.createElement('canvas'); canvas.width=512; canvas.height=128; const ctx = canvas.getContext('2d');
+  ctx.font = '28px system-ui'; ctx.fillStyle = 'white'; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText(text, 256, 64);
+  const tex = new THREE.CanvasTexture(canvas); const mat = new THREE.SpriteMaterial({map:tex, transparent:true});
+  const sp = new THREE.Sprite(mat); sp.position.copy(position).setY(position.y + 4); sp.scale.set(10,2.5,1); floatGroup.add(sp);
+  sp.userData.life = 4.0;
+}
+
+// Interaction & other gameplay functions
+function interact(){
+  showToast('Interakce... (např. tankování, doručení)');
+}
+
+// Role action (Q)
+function doRoleAction(){
+  if (player.role==='police'){ player.siren=!player.siren; showToast(player.siren?'Siréna ZAP':'Siréna VYP'); }
+  else if (player.role==='medic'){ const down = pedestrians.find(p=>!p.alive || p.needHelp); if (down){ down.alive=true; down.needHelp=false; player.money+=60; showToast('Oživeno: +$60'); } else showToast('Nikdo nepotřebuje pomoc.'); }
+  else if (player.role==='fire'){ if (fires.length){ const fx=fires.shift(); scene.remove(fx.mesh); player.money+=80; showToast('Uhašeno: +$80'); } else showToast('Žádný požár.'); }
+  else if (player.role==='pilot'){ player.inAir=!player.inAir; player.obj.position.y = player.inAir?5:0.4; player.maxSpeed = player.inAir?14:10; showToast(player.inAir?'Vzlet':'Přistání'); }
+}
+
+// Fires
+const fires = []; let fireTimer = 0;
+function spawnFire(){ const b = buildings.children[Math.floor(Math.random()*buildings.children.length)]; if (!b) return; const geo = new THREE.BoxGeometry(b.geometry.parameters.width*0.8, 0.4, b.geometry.parameters.depth*0.8); const mat = new THREE.MeshStandardMaterial({color:0xb52b2b, emissive:0x330000, emissiveIntensity:0.8}); const m = new THREE.Mesh(geo, mat); m.position.set(b.position.x, 0.22, b.position.z); scene.add(m); fires.push({mesh:m}); }
+
+// Main loop
+let last = performance.now();
+function loop(now){
+  const dt = Math.min(0.05, (now - last)/1000); last = now;
+
+  // update traffic lights
+  lights.forEach(l=>{ l.t += dt; if (tlAuto){ if (l.t>5){ l.state=(l.state+1)%3; l.t=0; } } l.bulbNS.intensity = (l.state===0)?2:0; l.bulbEW.intensity = (l.state===1)?2:0; });
+
+  // pedestrians
+  pedestrians.forEach(p=>{ if (!p.alive) return; if (Math.random()<0.02) p.dir += (Math.random()-0.5)*0.7; p.obj.position.x += Math.cos(p.dir)*p.speed*dt*3; p.obj.position.z += Math.sin(p.dir)*p.speed*dt*3; if (Math.random()<0.0006){ p.needHelp=true; p.alive=false; p.obj.material.color.setHex(0x555555); } });
+
+  // NPC cars
+  cars.forEach(c=>{
+    if (c.responding && c.target){
+      const dirVec = new THREE.Vector3().subVectors(c.target, c.obj.position); dirVec.y = 0; const dist = dirVec.length();
+      if (dist > 3){ dirVec.normalize(); c.obj.position.addScaledVector(dirVec, Math.min(5*dt, dist)); c.obj.userData.alert = true; }
+      else { c.responding = false; c.target = null; c.obj.userData.alert = false; }
+    } else {
+      const fwd = new THREE.Vector3(0,0,-1).applyQuaternion(c.obj.quaternion);
+      c.obj.position.addScaledVector(fwd, c.speed*dt*1.2);
+      if (Math.random()<0.01){ c.obj.rotation.y += (Math.random()<0.5?-1:1)*Math.PI/2; }
+      if (Math.random()<0.01) c.speed = Math.max(1.2, c.speed-0.2);
+      c.speed = Math.min(4, c.speed+0.02);
+    }
+    const mesh = c.obj.children[0];
+    if (c.obj.userData.alert){
+      mesh.material.emissive = new THREE.Color(0x333333);
+      mesh.scale.y = 1.06;
+    } else { mesh.material.emissive = new THREE.Color(0x000000); mesh.scale.y = 1.0; }
+    if (c.obj.position.x<-200 || c.obj.position.x>200) c.obj.position.x = -c.obj.position.x*0.9;
+    if (c.obj.position.z<-200 || c.obj.position.z>200) c.obj.position.z = -c.obj.position.z*0.9;
+    if (c.obj.userData.respondTimer){ c.obj.userData.respondTimer -= dt; if (c.obj.userData.respondTimer<=0) c.obj.userData.respondTimer = 0; }
+  });
+
+  // player movement
+  const forward = (keys['w']||keys['arrowup']||keys['mobile_gas']) ? 1 : 0;
+  const back = (keys['s']||keys['arrowdown']||keys['mobile_brake']) ? 1 : 0;
+  const left = (keys['a']||keys['arrowleft']) ? 1 : 0;
+  const right = (keys['d']||keys['arrowright']) ? 1 : 0;
+  const joyY = -stickState.dy, joyX = stickState.dx;
+  const throttle = Math.max(forward, Math.max(0, joyY));
+  const brake = Math.max(back, Math.max(0, -joyY));
+  if (throttle>0) player.speed = Math.min(player.maxSpeed, player.speed + player.accel*throttle);
+  if (brake>0 || keys['space']) player.speed = Math.max(0, player.speed - 0.18 - brake*0.06);
+  let steer = (left?-1:0) + (right?1:0) + joyX;
+  if (steer!==0){ player.angle += steer * player.turn * (player.inAir?0.6:1); }
+  const forwardVec = new THREE.Vector3(Math.sin(player.angle), 0, -Math.cos(player.angle));
+  player.obj.position.addScaledVector(forwardVec, player.speed*dt*(player.inAir?1.6:1)); player.obj.rotation.y = player.angle;
+
+  // floating texts lifetime
+  floatGroup.children.forEach(s=>{ s.userData.life -= dt; s.position.y += dt*0.2; if (s.userData.life<=0){ floatGroup.remove(s); s.material.map.dispose(); s.material.dispose(); } });
+
+  // fires spawn
+  fireTimer += dt;
+  if (fireTimer>8){ fireTimer=0; if (Math.random()<0.6) spawnFire(); }
+
+  // camera follows
+  const camTarget = player.obj.position.clone();
+  controls.target.lerp(camTarget, 0.15);
+  camera.position.lerp(new THREE.Vector3(player.obj.position.x - Math.sin(player.angle)*10, player.obj.position.y + 8 + (player.inAir?6:0), player.obj.position.z + Math.cos(player.angle)*10), 0.1);
+
+  // HUD updates
+  document.getElementById('money').textContent = Math.floor(player.money);
+  document.getElementById('fuel').textContent = Math.floor(player.fuel);
+
+  controls.update();
+  renderer.render(scene, camera);
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+window.addEventListener('keydown', e=>{
+  const k=e.key.toLowerCase();
+  if (k==='r'){ player.obj.position.set(-120, player.inAir?5:0.4, -120); player.speed=0; }
+  if (k==='t'){ tlAuto=!tlAuto; document.getElementById('tlmode').textContent = tlAuto?'AUTO':'MANUAL'; }
+  if (k==='e'){ interact(); }
+  if (k==='q'){ doRoleAction(); }
+});
+
+// end of script
+</script>
+</body>
+</html>
